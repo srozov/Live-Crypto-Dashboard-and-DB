@@ -34,12 +34,44 @@ class CryptoDataGrabber(object):
         self.exchange.enableRateLimit = True
         self.delay_seconds = self.exchange.rateLimit / 1000
         self.symbols = self.exchange.symbols
+
+
         self.symbols_USDT = [s for s in self.symbols if "USDT" in s]
 
-        self.since_datetime = datetime.datetime.strptime('2018-05-04 00:39:00', '%Y-%m-%d %H:%M:%S')
+        self.since_datetime = datetime.datetime.strptime('2018-04-01 00:00:00', '%Y-%m-%d %H:%M:%S')
 
         self.timeframe = '1m'
-        self.db_file = 'databases/market_prices.db'  # name of the sqlite database file
+
+        if self.timeframe == '1m':
+            self.timeframe_s = 60
+        elif self.timeframe == '5m':
+            self.timeframe_s = 5 * 60
+        elif self.timeframe == '15m':
+            self.timeframe_s = 15 * 60
+        elif self.timeframe == '30m':
+            self.timeframe_s = 30 * 60
+        elif self.timeframe == '1h':
+            self.timeframe_s = 60 *60
+        elif self.timeframe == '2h':
+            self.timeframe_s = 2 * 60 * 60
+        elif self.timeframe == '4h':
+            self.timeframe_s = 4 * 60 * 60
+        elif self.timeframe == '6h':
+            self.timeframe_s = 6 * 60 * 60
+        elif self.timeframe == '12h':
+            self.timeframe_s = 12 * 60 * 60
+        elif self.timeframe == '1d':
+            self.timeframe_s = 24 * 60 * 60
+        elif self.timeframe == '1w':
+            self.timeframe_s = 7 * 24 * 60 * 60
+
+
+        self.graph_w = 1000
+
+        self.db_file = 'databases/market_prices_' + self.timeframe + '.db'
+
+
+        # name of the sqlite database file
         self.deques = dict()
         self.ohlcv = dict()
         self.last_ohlcv = []
@@ -49,49 +81,59 @@ class CryptoDataGrabber(object):
         c = db.cursor()
 
 
-        for symbol in self.symbols_USDT:
+        # create table if not exist for each pair
+
+        for symbol in self.symbols:
 
             c.execute("CREATE TABLE IF NOT EXISTS " + "'{}'".format(
                 symbol) + "(time REAL, open REAL, high REAL, low REAL, close REAL, volume REAL)")
             db.commit()
 
 
-        c.execute("SELECT * FROM" + "'{}'".format(self.symbols_USDT[0]) + "ORDER BY time DESC limit 1")
+        #  check if table not empty, get start and end dates
+
+        c.execute("SELECT * FROM" + "'{}'".format('BTC/USDT') + "ORDER BY time DESC limit 1")
         last_row = c.fetchall()
 
-        c.execute("SELECT * FROM" + "'{}'".format(self.symbols_USDT[0]) + "ORDER BY time ASC limit 1")
+        c.execute("SELECT * FROM" + "'{}'".format('BTC/USDT') + "ORDER BY time ASC limit 1")
         first_row = c.fetchall()
+
+        # calculate number of candles to fetch to present time
 
         if len(first_row) > 0 :
 
             self.start_datetime = datetime.datetime.strptime(first_row[0][0], '%Y-%m-%d %H:%M:%S')
 
-            n_fetch = math.floor((datetime.datetime.now() - datetime.datetime.strptime(last_row[0][0], '%Y-%m-%d %H:%M:%S')).seconds / 60)
+            n_fetch = math.floor((datetime.datetime.now() - datetime.datetime.strptime(last_row[0][0], '%Y-%m-%d %H:%M:%S')).seconds / self.timeframe_s)
+
+            print('fetching ', n_fetch, ' candles')
+
+        # if empty fetch 500 chandles
 
         else :
 
             self.start_datetime = datetime.datetime.now()
-            self.start_datetime = self.start_datetime - datetime.timedelta(minutes=self.start_datetime.minute % 1,
+            self.start_datetime = self.start_datetime - datetime.timedelta(minutes=self.start_datetime.minute % self.timeframe_s,
                                          seconds=self.start_datetime.second,
                                          microseconds=self.start_datetime.microsecond)
 
             n_fetch = 500
 
+        if n_fetch > 0:
+            for symbol in self.symbols:
+                if self.exchange.has['fetchOHLCV']:
+                    # print('Obtaining OHLCV data')
+                    data = self.exchange.fetch_ohlcv(symbol, timeframe= self.timeframe , limit= n_fetch)
+                    data = list(zip(*data))
+                    data[0] = [datetime.datetime.fromtimestamp(ms / 1000)
+                               for ms in data[0]]
+                    self.ohlcv[symbol] = data
 
-        for symbol in self.symbols_USDT:
-            if self.exchange.has['fetchOHLCV']:
-                # print('Obtaining OHLCV data')
-                data = self.exchange.fetch_ohlcv(symbol, timeframe= self.timeframe , limit= n_fetch)
-                data = list(zip(*data))
-                data[0] = [datetime.datetime.fromtimestamp(ms / 1000)
-                           for ms in data[0]]
-                self.ohlcv[symbol] = data
-
-                c.execute("CREATE TABLE IF NOT EXISTS " + "'{}'".format(
-                    symbol) + "(time REAL, open REAL, high REAL, low REAL, close REAL, volume REAL)")
-                c.executemany("INSERT INTO " + "'{}'".format(symbol) + "VALUES(?,?,?,?,?,?)",
-                              np.array(self.ohlcv[symbol]).transpose())
-                db.commit()
+                    c.execute("CREATE TABLE IF NOT EXISTS " + "'{}'".format(
+                        symbol) + "(time REAL, open REAL, high REAL, low REAL, close REAL, volume REAL)")
+                    c.executemany("INSERT INTO " + "'{}'".format(symbol) + "VALUES(?,?,?,?,?,?)",
+                                  np.array(self.ohlcv[symbol]).transpose())
+                    db.commit()
 
         db.close()
 
@@ -111,7 +153,7 @@ class CryptoDataGrabber(object):
 
     def get_symbols(self):
         """"""
-        return self.symbols_USDT
+        return self.symbols
 
     def get_prices(self, symbol):
         """"""
@@ -124,23 +166,21 @@ class CryptoDataGrabber(object):
 
     def get_window_ohlcv(self, symbol):
         """"""
-        con = create_engine('sqlite:///databases/market_prices.db')
+        con = create_engine('sqlite:///' + self.db_file)
         df = pd.read_sql(
-            "SELECT * FROM (SELECT * FROM" + "'{}'".format(symbol) + "ORDER BY time DESC limit 100) ORDER BY time ASC",
+            "SELECT * FROM (SELECT * FROM" + "'{}'".format(symbol) + "ORDER BY time DESC limit " + "'{}'".format(self.graph_w) + ") ORDER BY time ASC",
             con)
         return df
 
     def fetch_ohlcv_seq(self):
 
-        msec = 1000
-        minute = 60 * msec
         hold = 30
 
         db = sqlite3.connect(self.db_file)
         c = db.cursor()
         ohlcv = dict()
 
-        for symbol in self.symbols_USDT:
+        for symbol in self.symbols:
 
             c.execute("SELECT * FROM" + "'{}'".format(
                 symbol) + "ORDER BY time ASC limit 1")
@@ -155,10 +195,10 @@ class CryptoDataGrabber(object):
 
             if self.exchange.has['fetchOHLCV']:
 
-                while since_timestamp + 500 * minute < start_timestamp:
+                while since_timestamp + 500 * self.timeframe_s * 1000 < start_timestamp:
                     try:
-                        ohlcvs = self.exchange.fetch_ohlcv(symbol, '1m', since_timestamp)
-                        since_timestamp += len(ohlcvs) * minute
+                        ohlcvs = self.exchange.fetch_ohlcv(symbol, self.timeframe, since_timestamp)
+                        since_timestamp += len(ohlcvs) * self.timeframe_s * 1000
                         data += ohlcvs
 
 
@@ -169,25 +209,28 @@ class CryptoDataGrabber(object):
                         print('Got an error', type(error).__name__, error.args, ', retrying in', hold, 'seconds...')
                         time.sleep(hold)
 
-                n_fetch = math.floor((start_timestamp - data[-1][0]) / 60000) - 1
-                print('fetching last')
+                n_fetch = math.floor((start_timestamp - since_timestamp) / (self.timeframe_s * 1000)) - 1
+
+                # if n_fetch > 0:
+
+                print('fetching last', n_fetch, 'candles')
                 print(symbol)
 
-                ohlcvs = self.exchange.fetch_ohlcv(symbol, '1m', since_timestamp, limit=n_fetch)
+                ohlcvs = self.exchange.fetch_ohlcv(symbol, self.timeframe, since_timestamp, limit=n_fetch)
 
                 data += ohlcvs
 
                 data = list(zip(*data))
 
                 data[0] = [datetime.datetime.fromtimestamp(ms / 1000)
-                           for ms in data[0]]
+                       for ms in data[0]]
 
                 ohlcv[symbol] = data
 
                 c.execute("CREATE TABLE IF NOT EXISTS " + "'{}'".format(
                     symbol) + "(time REAL, open REAL, high REAL, low REAL, close REAL, volume REAL)")
                 c.executemany("INSERT INTO " + "'{}'".format(symbol) + "VALUES(?,?,?,?,?,?)",
-                              np.array(ohlcv[symbol]).transpose())
+                          np.array(ohlcv[symbol]).transpose())
                 db.commit()
 
         db.close()
@@ -202,14 +245,14 @@ class CryptoDataGrabber(object):
         db = sqlite3.connect(self.db_file)
         c = db.cursor()
         c.execute("SELECT * FROM" + "'{}'".format(
-            self.symbols_USDT[0]) + "ORDER BY time DESC limit 1")
+            'BTC/USDT') + "ORDER BY time DESC limit 1")
         last_row = c.fetchall()
 
         db_current_time = True
 
         while db_current_time :
 
-            if datetime.datetime.fromtimestamp(self.exchange.fetch_ohlcv(self.symbols_USDT[0], timeframe='1m', limit=1)[0][0] / 1000) == datetime.datetime.strptime(last_row[0][0], '%Y-%m-%d %H:%M:%S') :
+            if datetime.datetime.fromtimestamp(self.exchange.fetch_ohlcv('BTC/USDT', self.timeframe, limit=1)[0][0] / 1000) == datetime.datetime.strptime(last_row[0][0], '%Y-%m-%d %H:%M:%S') :
                 time.sleep(15)
             else :
 
@@ -219,9 +262,9 @@ class CryptoDataGrabber(object):
         while True:
 
             start_time = datetime.datetime.now()
-            for symbol in self.symbols_USDT:
+            for symbol in self.symbols:
 
-                self.last_ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe='1m', limit=1)
+                self.last_ohlcv = self.exchange.fetch_ohlcv(symbol, self.timeframe, limit=1)
                 self.last_ohlcv[0][0] = datetime.datetime.fromtimestamp(self.last_ohlcv[0][0] / 1000)
 
                 c.execute("CREATE TABLE IF NOT EXISTS " + "'{}'".format(
@@ -230,7 +273,7 @@ class CryptoDataGrabber(object):
                               self.last_ohlcv)
                 db.commit()
 
-            wait_time = 60 - (datetime.datetime.now() - start_time).seconds
+            wait_time = self.timeframe_s - (datetime.datetime.now() - start_time).seconds
             time.sleep(wait_time)
 
 
@@ -256,6 +299,8 @@ app.layout = html.Div([
                 }
             ),
         ], className="row"),
+
+        # change update interval later
 
         dcc.Interval(id='graph-update', interval=60 * 1000),
     ], className="row")
