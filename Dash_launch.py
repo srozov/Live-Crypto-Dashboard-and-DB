@@ -36,11 +36,11 @@ class CryptoDataGrabber(object):
         self.symbols = self.exchange.symbols
 
 
-        self.symbols_USDT = [s for s in self.symbols if "USDT" in s]
+        self.symbols = [s for s in self.symbols if "BTC" in s]
 
-        self.since_datetime = datetime.datetime.strptime('2018-04-01 00:00:00', '%Y-%m-%d %H:%M:%S')
+        self.since_datetime = datetime.datetime.strptime('2018-01-01 00:00:00', '%Y-%m-%d %H:%M:%S')
 
-        self.timeframe = '1m'
+        self.timeframe = '1h'
 
         if self.timeframe == '1m':
             self.timeframe_s = 60
@@ -67,6 +67,8 @@ class CryptoDataGrabber(object):
 
 
         self.graph_w = 1000
+
+
 
         self.db_file = 'databases/market_prices_' + self.timeframe + '.db'
 
@@ -117,7 +119,13 @@ class CryptoDataGrabber(object):
                                          seconds=self.start_datetime.second,
                                          microseconds=self.start_datetime.microsecond)
 
-            n_fetch = 500
+            n_fetch = math.floor((self.start_datetime - self.since_datetime).seconds / self.timeframe_s)
+
+            if n_fetch > 500:
+
+                n_fetch = 500
+
+            print('fetching ', n_fetch, ' candles')
 
         if n_fetch > 0:
             for symbol in self.symbols:
@@ -211,27 +219,27 @@ class CryptoDataGrabber(object):
 
                 n_fetch = math.floor((start_timestamp - since_timestamp) / (self.timeframe_s * 1000)) - 1
 
-                # if n_fetch > 0:
+                if n_fetch > 0:
 
-                print('fetching last', n_fetch, 'candles')
-                print(symbol)
+                    print('fetching last', n_fetch, 'candles')
+                    print(symbol)
 
-                ohlcvs = self.exchange.fetch_ohlcv(symbol, self.timeframe, since_timestamp, limit=n_fetch)
+                    ohlcvs = self.exchange.fetch_ohlcv(symbol, self.timeframe, since_timestamp, limit=n_fetch)
 
-                data += ohlcvs
+                    data += ohlcvs
 
-                data = list(zip(*data))
+                    data = list(zip(*data))
 
-                data[0] = [datetime.datetime.fromtimestamp(ms / 1000)
-                       for ms in data[0]]
+                    data[0] = [datetime.datetime.fromtimestamp(ms / 1000)
+                           for ms in data[0]]
 
-                ohlcv[symbol] = data
+                    ohlcv[symbol] = data
 
-                c.execute("CREATE TABLE IF NOT EXISTS " + "'{}'".format(
-                    symbol) + "(time REAL, open REAL, high REAL, low REAL, close REAL, volume REAL)")
-                c.executemany("INSERT INTO " + "'{}'".format(symbol) + "VALUES(?,?,?,?,?,?)",
-                          np.array(ohlcv[symbol]).transpose())
-                db.commit()
+                    c.execute("CREATE TABLE IF NOT EXISTS " + "'{}'".format(
+                        symbol) + "(time REAL, open REAL, high REAL, low REAL, close REAL, volume REAL)")
+                    c.executemany("INSERT INTO " + "'{}'".format(symbol) + "VALUES(?,?,?,?,?,?)",
+                              np.array(ohlcv[symbol]).transpose())
+                    db.commit()
 
         db.close()
 
