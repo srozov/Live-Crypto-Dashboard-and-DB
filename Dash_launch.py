@@ -88,7 +88,7 @@ class CryptoDataGrabber(object):
         for symbol in self.symbols:
 
             c.execute("CREATE TABLE IF NOT EXISTS " + "'{}'".format(
-                symbol) + "(time REAL, open REAL, high REAL, low REAL, close REAL, volume REAL)")
+                symbol) + "(time REAL, open REAL, high REAL, low REAL, close REAL, b_volume REAL, q_volume REAL)")
             db.commit()
 
 
@@ -143,11 +143,15 @@ class CryptoDataGrabber(object):
                     data = list(zip(*data))
                     data[0] = [datetime.datetime.fromtimestamp(ms / 1000)
                                for ms in data[0]]
+
+                    # add quote volume
+                    data.append(tuple([a * b for a, b in zip(data[4], data[5])]))
+
                     self.ohlcv[symbol] = data
 
                     c.execute("CREATE TABLE IF NOT EXISTS " + "'{}'".format(
-                        symbol) + "(time REAL, open REAL, high REAL, low REAL, close REAL, volume REAL)")
-                    c.executemany("INSERT INTO " + "'{}'".format(symbol) + "VALUES(?,?,?,?,?,?)",
+                        symbol) + "(time REAL, open REAL, high REAL, low REAL, close REAL, b_volume REAL, q_volume REAL)")
+                    c.executemany("INSERT INTO " + "'{}'".format(symbol) + "VALUES(?,?,?,?,?,?,?)",
                                   np.array(self.ohlcv[symbol]).transpose())
                     db.commit()
 
@@ -227,6 +231,8 @@ class CryptoDataGrabber(object):
 
                 n_fetch = math.floor((start_timestamp - since_timestamp) / (self.timeframe_s * 1000)) - 1
 
+                # TODO: correct:  won't write to db if fetched exactly 500 candles the first time?
+
                 if n_fetch > 0:
 
                     print('fetching last', n_fetch, 'candles')
@@ -241,11 +247,15 @@ class CryptoDataGrabber(object):
                     data[0] = [datetime.datetime.fromtimestamp(ms / 1000)
                            for ms in data[0]]
 
+                    # add quote volume
+                    data.append(tuple([a * b for a, b in zip(data[4], data[5])]))
+
+
                     ohlcv[symbol] = data
 
                     c.execute("CREATE TABLE IF NOT EXISTS " + "'{}'".format(
-                        symbol) + "(time REAL, open REAL, high REAL, low REAL, close REAL, volume REAL)")
-                    c.executemany("INSERT INTO " + "'{}'".format(symbol) + "VALUES(?,?,?,?,?,?)",
+                        symbol) + "(time REAL, open REAL, high REAL, low REAL, close REAL, b_volume REAL, q_volume REAL)")
+                    c.executemany("INSERT INTO " + "'{}'".format(symbol) + "VALUES(?,?,?,?,?,?,?)",
                               np.array(ohlcv[symbol]).transpose())
                     db.commit()
 
@@ -282,10 +292,11 @@ class CryptoDataGrabber(object):
 
                 self.last_ohlcv = self.exchange.fetch_ohlcv(symbol, self.timeframe, limit=1)
                 self.last_ohlcv[0][0] = datetime.datetime.fromtimestamp(self.last_ohlcv[0][0] / 1000)
+                self.last_ohlcv.append(tuple([a * b for a, b in zip(self.last_ohlcv[4], self.last_ohlcv[5])]))
 
                 c.execute("CREATE TABLE IF NOT EXISTS " + "'{}'".format(
-                    symbol) + "(time REAL, open REAL, high REAL, low REAL, close REAL, volume REAL)")
-                c.executemany("INSERT INTO " + "'{}'".format(symbol) + "VALUES(?,?,?,?,?,?)",
+                    symbol) + "(time REAL, open REAL, high REAL, low REAL, close REAL, b_volume REAL, q_volume REAL)")
+                c.executemany("INSERT INTO " + "'{}'".format(symbol) + "VALUES(?,?,?,?,?,?,?)",
                               self.last_ohlcv)
                 db.commit()
 
