@@ -95,9 +95,17 @@ class CryptoDataGrabber(object):
         #  check if table not empty, get start and end dates
 
         c.execute("SELECT * FROM" + "'{}'".format('BTC/USDT') + "ORDER BY time DESC limit 1")
+
+        # TODO change to last_row = c.execute("SELECT MAX(time) FROM" + "'{}'".format(symbol)).fetchall()[0][0]
+
+
         last_row = c.fetchall()
 
         c.execute("SELECT * FROM" + "'{}'".format('BTC/USDT') + "ORDER BY time ASC limit 1")
+
+        # TODO change to first_row = c.execute("SELECT MIN(time) FROM" + "'{}'".format(symbol)).fetchall()[0][0]
+
+
         first_row = c.fetchall()
 
         # calculate number of candles to fetch to present time
