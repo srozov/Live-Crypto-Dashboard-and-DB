@@ -36,11 +36,20 @@ class CryptoDataGrabber(object):
         self.symbols = self.exchange.symbols
 
 
-        self.symbols = [s for s in self.symbols if "BTC" in s]
+        # self.symbols = [s for s in self.symbols if "BTC" in s]
+
+
+        # self.symbols = ['BCH/BTC', 'EOS/BTC', 'ADA/BTC', 'XRP/BTC', 'LTC/BTC', 'TRX/BTC', 'ICX/BTC', 'GVT/BTC', 'XMR/BTC', 'XLM/BTC']
+
+
+        self.symbols =  ['BTC/USDT', 'ETH/BTC', 'XRP/BTC', 'XEM/BTC', 'STRAT/BTC', 'XMR/BTC', 'LTC/BTC', 'BCH/BTC', 'ETC/BTC']
+
+
+        self.symbols_sel = []
 
         self.since_datetime = datetime.datetime.strptime('2018-01-01 00:00:00', '%Y-%m-%d %H:%M:%S')
 
-        self.timeframe = '1h'
+        self.timeframe = '2h'
 
         if self.timeframe == '1m':
             self.timeframe_s = 60
@@ -72,6 +81,8 @@ class CryptoDataGrabber(object):
 
         self.db_file = 'databases/market_prices_' + self.timeframe + '.db'
 
+        self.db_file_sel = 'databases/market_prices_sel_' + self.timeframe + '.db'
+
 
         # name of the sqlite database file
         self.deques = dict()
@@ -79,29 +90,67 @@ class CryptoDataGrabber(object):
         self.last_ohlcv = []
         # self.database = dataset.connect(self.db_url)
         ensure_dir('databases')
-        db = sqlite3.connect(self.db_file)
-        c = db.cursor()
+        # db = sqlite3.connect(self.db_file)
+        # db_sel = sqlite3.connect(self.db_file_sel)
+
+        self.fill_tables(self.symbols, self.db_file)
 
 
+        if self.start_datetime != self.since_datetime :
+
+
+            self.fetch_ohlcv_seq(self.symbols, self.db_file)
+
+        # for vol-selected symbols (first run)
+
+        # self.symbols_sel = self.get_symbols_by_vol()
+        #
+        # self.fill_tables(self.symbols_sel, self.db_file_sel)
+        #
+        # self.fetch_ohlcv_seq(self.symbols_sel, self.db_file_sel)
+
+
+        # db = sqlite3.connect(self.db_file_sel)
+        # c = db.cursor()
+        # c.execute("SELECT * FROM" + "'{}'".format('BTC/USDT') + "ORDER BY time ASC limit 1")
+        # first_row = c.fetchall()
+        # self.start_datetime_sel = datetime.datetime.strptime(first_row[0][0], '%Y-%m-%d %H:%M:%S')
+        # if self.start_datetime_sel != self.since_datetime :
+
+        # print('pass fill')
+
+
+        #     self.deques[symbol] = deque()
+        #
+        #     for e in self.database[symbol]:
+        #         entry = (e['bid'], e['ask'], e['spread'], e['time'])
+        #         self.deques[symbol].append(entry)
+        # del self.database
+        self.thread = threading.Thread(target=self.__update)
+        self.thread.daemon = True
+        self.thread.start()
+
+    def fill_tables(self, symbols, db_file):
         # create table if not exist for each pair
 
-        for symbol in self.symbols:
+        db = sqlite3.connect(db_file)
+        c = db.cursor()
 
+        for symbol in symbols:
             c.execute("CREATE TABLE IF NOT EXISTS " + "'{}'".format(
                 symbol) + "(time REAL, open REAL, high REAL, low REAL, close REAL, b_volume REAL, q_volume REAL)")
             db.commit()
 
+        # check if table not empty, get start and end dates
 
-        #  check if table not empty, get start and end dates
-
-        c.execute("SELECT * FROM" + "'{}'".format('BTC/USDT') + "ORDER BY time DESC limit 1")
+        c.execute("SELECT * FROM" + "'{}'".format(symbols[0]) + "ORDER BY time DESC limit 1")
 
         # TODO change to last_row = c.execute("SELECT MAX(time) FROM" + "'{}'".format(symbol)).fetchall()[0][0]
 
 
         last_row = c.fetchall()
 
-        c.execute("SELECT * FROM" + "'{}'".format('BTC/USDT') + "ORDER BY time ASC limit 1")
+        c.execute("SELECT * FROM" + "'{}'".format(symbols[0]) + "ORDER BY time ASC limit 1")
 
         # TODO change to first_row = c.execute("SELECT MIN(time) FROM" + "'{}'".format(symbol)).fetchall()[0][0]
 
@@ -110,36 +159,45 @@ class CryptoDataGrabber(object):
 
         # calculate number of candles to fetch to present time
 
-        if len(first_row) > 0 :
+        if len(first_row) > 0:
 
             self.start_datetime = datetime.datetime.strptime(first_row[0][0], '%Y-%m-%d %H:%M:%S')
 
-            n_fetch = math.floor((datetime.datetime.now() - datetime.datetime.strptime(last_row[0][0], '%Y-%m-%d %H:%M:%S')).seconds / self.timeframe_s)
+            n_fetch = math.floor((datetime.datetime.now() - datetime.datetime.strptime(last_row[0][0],
+                                                                                       '%Y-%m-%d %H:%M:%S')).total_seconds() / self.timeframe_s)
 
-            print('fetching ', n_fetch, ' candles')
+            print('fetching', n_fetch, ' candles (from end to now)')
 
         # if empty fetch 500 chandles
 
-        else :
+        else:
 
             self.start_datetime = datetime.datetime.now()
-            self.start_datetime = self.start_datetime - datetime.timedelta(minutes=self.start_datetime.minute % self.timeframe_s,
-                                         seconds=self.start_datetime.second,
-                                         microseconds=self.start_datetime.microsecond)
+            self.start_datetime = self.start_datetime - datetime.timedelta(
+                minutes=self.start_datetime.minute % self.timeframe_s,
+                seconds=self.start_datetime.second,
+                microseconds=self.start_datetime.microsecond)
 
-            n_fetch = math.floor((self.start_datetime - self.since_datetime).seconds / self.timeframe_s)
+            print('start_dt %s' % str(self.start_datetime))
+            print('since_dt %s' % str(self.since_datetime))
+
+
+            #  TODO this is wrong -> timedelta.total_seconds()
+
+            n_fetch = math.floor((self.start_datetime - self.since_datetime).total_seconds() / self.timeframe_s)
+
+            # print((self.start_datetime - self.since_datetime).total_seconds())
 
             if n_fetch > 500:
-
                 n_fetch = 500
 
-            print('fetching ', n_fetch, ' candles')
+            print('fetching ', n_fetch, ' candles (from now to end)')
 
         if n_fetch > 0:
-            for symbol in self.symbols:
+            for symbol in symbols:
                 if self.exchange.has['fetchOHLCV']:
                     # print('Obtaining OHLCV data')
-                    data = self.exchange.fetch_ohlcv(symbol, timeframe= self.timeframe , limit= n_fetch)
+                    data = self.exchange.fetch_ohlcv(symbol, timeframe=self.timeframe, limit=n_fetch)
                     data = list(zip(*data))
                     data[0] = [datetime.datetime.fromtimestamp(ms / 1000)
                                for ms in data[0]]
@@ -157,19 +215,23 @@ class CryptoDataGrabber(object):
 
         db.close()
 
-        if self.start_datetime != self.since_datetime :
+    def get_symbols_by_vol(self):
 
-            self.fetch_ohlcv_seq()
+        total_volume = {}
 
-        #     self.deques[symbol] = deque()
-        #
-        #     for e in self.database[symbol]:
-        #         entry = (e['bid'], e['ask'], e['spread'], e['time'])
-        #         self.deques[symbol].append(entry)
-        # del self.database
-        self.thread = threading.Thread(target=self.__update)
-        self.thread.daemon = True
-        self.thread.start()
+        db = sqlite3.connect(self.db_file)
+        c = db.cursor()
+
+        for symbol in self.symbols:
+            total_volume[symbol] = c.execute('SELECT SUM(q_volume) FROM (SELECT q_volume FROM ' + "'{}'".format(
+                symbol) + 'ORDER BY time DESC limit 24 * 7 )').fetchall()[0][0]
+
+        symbols_by_vol = sorted(total_volume, key=total_volume.get)[-9:]
+
+        # symbols_by_vol.remove('BCN/BTC')
+        # symbols_by_vol.append('VEN/BTC')
+
+        return symbols_by_vol
 
     def get_symbols(self):
         """"""
@@ -192,15 +254,15 @@ class CryptoDataGrabber(object):
             con)
         return df
 
-    def fetch_ohlcv_seq(self):
+    def fetch_ohlcv_seq(self, symbols, db_file):
 
         hold = 30
+        db = sqlite3.connect(db_file)
 
-        db = sqlite3.connect(self.db_file)
         c = db.cursor()
         ohlcv = dict()
 
-        for symbol in self.symbols:
+        for symbol in symbols:
 
             c.execute("SELECT * FROM" + "'{}'".format(
                 symbol) + "ORDER BY time ASC limit 1")
@@ -300,7 +362,7 @@ class CryptoDataGrabber(object):
                               self.last_ohlcv)
                 db.commit()
 
-            wait_time = self.timeframe_s - (datetime.datetime.now() - start_time).seconds
+            wait_time = self.timeframe_s - (datetime.datetime.now() - start_time).total_seconds()
             time.sleep(wait_time)
 
 
