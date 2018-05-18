@@ -49,7 +49,7 @@ class CryptoDataGrabber(object):
 
         self.since_datetime = datetime.datetime.strptime('2018-01-01 00:00:00', '%Y-%m-%d %H:%M:%S')
 
-        self.timeframe = '2h'
+        self.timeframe = '30m'
 
         if self.timeframe == '1m':
             self.timeframe_s = 60
